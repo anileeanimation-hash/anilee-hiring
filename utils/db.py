@@ -41,9 +41,13 @@ def rows_to_dicts(rows):
 
 
 def init_db():
-    # ── Auto-restore from GitHub if DB is missing or empty ───────────────────
+    # ── Auto-restore from GitHub ──────────────────────────────────────────────
+    # On Streamlit Cloud (/tmp/) — ALWAYS pull latest backup so every restart
+    # gets the most up-to-date DB (cloud storage is ephemeral).
+    # On local machine — only pull if DB is missing or empty.
+    on_cloud = DB_PATH.startswith("/tmp/")
     db_is_fresh = not os.path.exists(DB_PATH) or os.path.getsize(DB_PATH) == 0
-    if db_is_fresh:
+    if db_is_fresh or on_cloud:
         try:
             from utils.db_sync import pull_db
             ok, msg = pull_db(DB_PATH)
