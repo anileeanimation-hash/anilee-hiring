@@ -109,12 +109,11 @@ with tab2:
     st.subheader("Schedule a New Interview")
 
     all_cands = get_all_candidates()
-    eligible = [c for c in all_cands
-                if c["stage"] not in ["Hired", "Rejected"] or
-                c.get("score_band") in ["Hot 🔥", "Warm ✅"]]
+    # All active candidates can be scheduled — exclude only Hired & Rejected
+    eligible = [c for c in all_cands if c["stage"] not in ["Hired", "Rejected"]]
 
     if not eligible:
-        st.info("No eligible candidates found. Screen some candidates first.")
+        st.info("No candidates found. Add a candidate from the Candidates page first.")
     else:
         with st.form("sched_form"):
             sf1, sf2 = st.columns(2)
@@ -143,21 +142,28 @@ with tab2:
                                     height=100)
 
             if st.form_submit_button("📅 Schedule Interview", type="primary", use_container_width=True):
-                add_interview(
-                    candidate_id=selected_cand["id"],
-                    candidate_name=selected_cand["name"],
-                    candidate_phone=selected_cand.get("phone", ""),
-                    scheduled_date=iv_date.strftime("%Y-%m-%d"),
-                    scheduled_time=iv_time.strftime("%H:%M"),
-                    duration_minutes=int(duration),
-                    interviewer=interviewer,
-                    mode=mode,
-                    notes=notes
-                )
-                st.success(
-                    f"✅ Interview scheduled for **{selected_cand['name']}** "
-                    f"on {iv_date.strftime('%d %b %Y')} at {iv_time.strftime('%I:%M %p')}!"
-                )
-                st.info(f"📱 Candidate Phone: **{selected_cand.get('phone', 'N/A')}**  \n"
-                        f"Remember to send a WhatsApp confirmation message.")
-                st.balloons()
+                if not interviewer.strip():
+                    st.error("⚠️ Please enter the interviewer name.")
+                else:
+                    try:
+                        add_interview(
+                            candidate_id=selected_cand["id"],
+                            candidate_name=selected_cand["name"],
+                            candidate_phone=selected_cand.get("phone", ""),
+                            scheduled_date=iv_date.strftime("%Y-%m-%d"),
+                            scheduled_time=iv_time.strftime("%H:%M"),
+                            duration_minutes=int(duration),
+                            interviewer=interviewer,
+                            mode=mode,
+                            notes=notes
+                        )
+                        st.success(
+                            f"✅ Interview scheduled for **{selected_cand['name']}** "
+                            f"on {iv_date.strftime('%d %b %Y')} at {iv_time.strftime('%I:%M %p')}!"
+                        )
+                        st.info(f"📱 Candidate Phone: **{selected_cand.get('phone', 'N/A')}**  \n"
+                                f"Remember to send a WhatsApp confirmation message.")
+                        st.balloons()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Could not save interview: {e}")
