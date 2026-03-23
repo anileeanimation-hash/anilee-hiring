@@ -1,14 +1,38 @@
 import streamlit as st
 import sys
 import os
+import threading
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.db import (get_all_candidates, add_candidate, update_candidate_stage,
                        delete_candidate, get_candidate_responses, save_response,
                        update_candidate_score, get_screening_questions,
-                       import_candidates_from_csv, STAGES, SOURCES)
+                       import_candidates_from_csv, log_activity, get_activity_log,
+                       STAGES, SOURCES)
 from utils.ai_screener import score_response, evaluate_full_screening
+
+
+def _send_screening_email_async(candidate_id: int, name: str, email: str):
+    """Fire-and-forget: send screening email in background so UI doesn't block."""
+    def _worker():
+        try:
+            from utils.db import get_screening_questions, update_candidate_stage, log_activity, get_activity_log
+            from utils.email_service import send_screening_email
+            # Only send if not already sent
+            activity = get_activity_log(candidate_id, limit=20)
+            already_sent = any(a["action"] == "Screening Email Sent" for a in activity)
+            if already_sent:
+                return
+            questions = get_screening_questions(enabled_only=True)
+            ok, msg = send_screening_email(name, email, questions, candidate_id)
+            if ok:
+                update_candidate_stage(candidate_id, "Outreached", "System")
+                log_activity(candidate_id, name, "Screening Email Sent",
+                             f"Auto-sent to {email}", "System")
+        except Exception:
+            pass
+    threading.Thread(target=_worker, daemon=True).start()
 
 st.set_page_config(page_title="Candidates — Anilee Hiring", page_icon="👥", layout="wide")
 st.title("👥 Candidates")
@@ -236,7 +260,15 @@ with tab2:
                     experience_months=int(experience_months),
                     expected_salary=int(expected_salary), notes=notes.strip()
                 )
-                st.success(f"✅ {name} added to pipeline!")
+                st.success(f"✅ {name.strip()} added to pipeline!")
+
+                # Auto-send screening email immediately if email is provided
+                if email.strip():
+                    _send_screening_email_async(cid, name.strip(), email.strip())
+                    st.info(f"📧 Screening email is being sent to **{email.strip()}** automatically.")
+                else:
+                    st.warning("⚠️ No email provided — screening email not sent. Add email to send manually via Automation page.")
+
                 st.balloons()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -271,3 +303,12 @@ with tab3:
             if errors:
                 for err in errors[:5]:
                     st.error(err)
+            # Auto-send screening emails to all imported candidates with emails
+            fresh_candidates = get_all_candidates(stage_filter="New")
+            email_count = 0
+            for c in fresh_candidates:
+                if c.get("email"):
+                    _send_screening_email_async(c["id"], c["name"], c["email"])
+                    email_count += 1
+            if email_count:
+                st.info(f"📧 Sending screening emails to {email_count} candidates automatically.")
