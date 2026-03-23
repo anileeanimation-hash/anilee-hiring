@@ -186,6 +186,29 @@ with tab2:
                     st.error("⚠️ Please enter the interviewer name.")
                 else:
                     try:
+                        # Generate Google Meet link for video call mode
+                        meet_link = ""
+                        final_notes = notes
+                        if "Video Call" in mode or "Google Meet" in mode:
+                            with st.spinner("Creating Google Meet link..."):
+                                try:
+                                    from utils.meet_scheduler import create_meet_event, _generate_fallback_link
+                                    cand_email_for_meet = selected_cand.get("email", "")
+                                    ml, event_id, err = create_meet_event(
+                                        candidate_name=selected_cand["name"],
+                                        candidate_email=cand_email_for_meet,
+                                        interview_date=iv_date.strftime("%Y-%m-%d"),
+                                        interview_time=iv_time.strftime("%H:%M"),
+                                        duration_minutes=int(duration),
+                                        interviewer_email="hr.anileeanimation@gmail.com",
+                                        description=f"Interview for Educational Counsellor\nCandidate: {selected_cand['name']}\nPhone: {selected_cand.get('phone','')}"
+                                    )
+                                    meet_link = ml if ml else _generate_fallback_link()
+                                except Exception:
+                                    from utils.meet_scheduler import _generate_fallback_link
+                                    meet_link = _generate_fallback_link()
+                            final_notes = f"{notes}\nGoogle Meet: {meet_link}".strip()
+
                         add_interview(
                             candidate_id=selected_cand["id"],
                             candidate_name=selected_cand["name"],
@@ -195,12 +218,14 @@ with tab2:
                             duration_minutes=int(duration),
                             interviewer=interviewer,
                             mode=mode,
-                            notes=notes
+                            notes=final_notes
                         )
                         st.success(
                             f"✅ Interview scheduled for **{selected_cand['name']}** "
                             f"on {iv_date.strftime('%d %b %Y')} at {iv_time.strftime('%I:%M %p')}!"
                         )
+                        if meet_link:
+                            st.info(f"🔗 Google Meet: {meet_link}")
 
                         # Auto-send interview invite email
                         cand_email = selected_cand.get("email", "")
@@ -208,7 +233,7 @@ with tab2:
                             ok, msg = _send_invite(
                                 selected_cand["name"], cand_email,
                                 iv_date.strftime("%Y-%m-%d"), iv_time.strftime("%H:%M"),
-                                mode, interviewer, selected_cand["id"], meet_link=""
+                                mode, interviewer, selected_cand["id"], meet_link
                             )
                             if ok:
                                 st.success(f"📧 Interview invite email sent to **{cand_email}**")
