@@ -6,8 +6,12 @@ _DEFAULT_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 # On Streamlit Cloud /mount/src is read-only — fall back to /tmp
 if not os.access(os.path.dirname(_DEFAULT_DB), os.W_OK):
     DB_PATH = "/tmp/hiring.db"
+    RESUME_DIR = "/tmp/resumes"
 else:
     DB_PATH = _DEFAULT_DB
+    RESUME_DIR = os.path.join(os.path.dirname(_DEFAULT_DB), "resumes")
+
+os.makedirs(RESUME_DIR, exist_ok=True)
 
 # ── Auto-backup helper ────────────────────────────────────────────────────────
 def _backup(reason: str = "write"):
@@ -146,6 +150,64 @@ def init_db():
             questions
         )
 
+    # Migration: add resume_path column if not present
+    try:
+        c.execute("ALTER TABLE candidates ADD COLUMN resume_path TEXT DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+
+    conn.commit()
+    conn.close()
+
+
+# ── RESUME HELPERS ───────────────────────────────────────────────────────────
+
+def save_resume(candidate_id: int, filename: str, file_bytes: bytes) -> str:
+    """Save resume file to disk and store path in DB. Returns saved path."""
+    ext = os.path.splitext(filename)[1].lower()
+    safe_name = f"candidate_{candidate_id}_resume{ext}"
+    save_path = os.path.join(RESUME_DIR, safe_name)
+    with open(save_path, "wb") as f:
+        f.write(file_bytes)
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE candidates SET resume_path = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+              (save_path, candidate_id))
+    c.execute("SELECT name FROM candidates WHERE id = ?", (candidate_id,))
+    row = c.fetchone()
+    if row:
+        _log(c, candidate_id, row["name"], "Resume Uploaded", filename, "HR")
+    conn.commit()
+    conn.close()
+    _backup(f"resume saved: {filename}")
+    return save_path
+
+
+def get_resume(candidate_id: int):
+    """Returns (path, bytes) if resume exists, else (None, None)."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT resume_path FROM candidates WHERE id = ?", (candidate_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row or not row["resume_path"]:
+        return None, None
+    path = row["resume_path"]
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return path, f.read()
+    return path, None  # path recorded but file missing (ephemeral cloud restart)
+
+
+def delete_resume(candidate_id: int):
+    """Remove resume file and clear path from DB."""
+    path, _ = get_resume(candidate_id)
+    if path and os.path.exists(path):
+        os.remove(path)
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE candidates SET resume_path = '' WHERE id = ?", (candidate_id,))
     conn.commit()
     conn.close()
 

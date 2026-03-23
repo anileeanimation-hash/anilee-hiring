@@ -9,6 +9,7 @@ from utils.db import (get_all_candidates, add_candidate, update_candidate_stage,
                        delete_candidate, get_candidate_responses, save_response,
                        update_candidate_score, get_screening_questions,
                        import_candidates_from_csv, log_activity, get_activity_log,
+                       save_resume, get_resume, delete_resume,
                        STAGES, SOURCES)
 from utils.ai_screener import score_response, evaluate_full_screening
 
@@ -109,6 +110,58 @@ with tab1:
 
                 if cand.get("ai_summary"):
                     st.info(f"**AI Summary:** {cand['ai_summary']}")
+
+                # ── RESUME SECTION ────────────────────────────────────────────
+                st.markdown("---")
+                resume_col1, resume_col2 = st.columns([3, 1])
+                with resume_col1:
+                    st.markdown("**📎 Resume**")
+                with resume_col2:
+                    show_resume_key = f"show_resume_{cand['id']}"
+                    if st.button("⬆️ Upload / Change", key=f"res_toggle_{cand['id']}", use_container_width=True):
+                        st.session_state[show_resume_key] = not st.session_state.get(show_resume_key, False)
+
+                # Show existing resume
+                res_path, res_bytes = get_resume(cand["id"])
+                if res_bytes:
+                    res_filename = os.path.basename(res_path) if res_path else "resume"
+                    ext = os.path.splitext(res_filename)[1].lower()
+                    dl_name = f"{cand['name'].replace(' ','_')}_resume{ext}"
+                    r1, r2 = st.columns(2)
+                    with r1:
+                        st.download_button(
+                            label=f"⬇️ Download Resume",
+                            data=res_bytes,
+                            file_name=dl_name,
+                            mime="application/pdf" if ext == ".pdf" else "application/octet-stream",
+                            key=f"dl_res_{cand['id']}",
+                            use_container_width=True
+                        )
+                    with r2:
+                        if st.button("🗑️ Remove Resume", key=f"del_res_{cand['id']}", use_container_width=True):
+                            delete_resume(cand["id"])
+                            st.success("Resume removed.")
+                            st.rerun()
+                elif res_path and not res_bytes:
+                    st.caption("⚠️ Resume file was lost on server restart. Please re-upload.")
+                else:
+                    st.caption("No resume uploaded yet.")
+
+                # Upload form
+                if st.session_state.get(show_resume_key):
+                    uploaded_resume = st.file_uploader(
+                        "Upload Resume (PDF or Word)",
+                        type=["pdf", "docx", "doc"],
+                        key=f"res_upload_{cand['id']}"
+                    )
+                    if uploaded_resume:
+                        if st.button("✅ Save Resume", key=f"res_save_{cand['id']}", type="primary"):
+                            save_resume(cand["id"], uploaded_resume.name, uploaded_resume.read())
+                            st.success(f"✅ Resume saved for **{cand['name']}**!")
+                            st.session_state[show_resume_key] = False
+                            st.rerun()
+
+                st.markdown("---")
 
                 # Action buttons
                 ab1, ab2 = st.columns(2)
