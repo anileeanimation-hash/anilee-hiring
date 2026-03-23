@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import os
 import threading
-import base64
+import io
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,6 +13,28 @@ from utils.db import (get_all_candidates, add_candidate, update_candidate_stage,
                        save_resume, get_resume, delete_resume,
                        STAGES, SOURCES)
 from utils.ai_screener import score_response, evaluate_full_screening
+
+
+def _render_pdf_preview(pdf_bytes: bytes, max_pages: int = 3):
+    """Render PDF pages as images using PyMuPDF and display with st.image."""
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total = len(doc)
+        pages_to_show = min(total, max_pages)
+        st.caption(f"Showing {pages_to_show} of {total} page(s)")
+        for i in range(pages_to_show):
+            page = doc[i]
+            mat = fitz.Matrix(1.5, 1.5)   # 1.5x zoom → readable but not huge
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            st.image(img_bytes, use_container_width=True,
+                     caption=f"Page {i + 1}" if total > 1 else None)
+        doc.close()
+    except ImportError:
+        st.warning("PDF preview requires PyMuPDF — installing on first deploy. Download to view.")
+    except Exception as e:
+        st.warning(f"Could not render preview: {e}")
 
 
 def _send_screening_email_async(candidate_id: int, name: str, email: str):
@@ -156,13 +178,7 @@ with tab1:
                     # ── Inline preview ────────────────────────────────────────
                     if st.session_state.get(show_preview_key):
                         if ext == ".pdf":
-                            b64 = base64.b64encode(res_bytes).decode()
-                            st.markdown(
-                                f'<iframe src="data:application/pdf;base64,{b64}" '
-                                f'width="100%" height="520px" style="border:1px solid #ddd;'
-                                f'border-radius:6px;margin-top:6px;"></iframe>',
-                                unsafe_allow_html=True
-                            )
+                            _render_pdf_preview(res_bytes)
                         else:
                             st.info("📄 Preview not available for Word files. Click ⬇️ Download to open.")
 
@@ -327,13 +343,8 @@ with tab2:
         if nrf_ext == ".pdf":
             nrf_bytes = new_resume_file.read()
             new_resume_file.seek(0)   # reset so it can be read again on save
-            b64_preview = base64.b64encode(nrf_bytes).decode()
             with st.expander("👁️ Preview attached resume", expanded=False):
-                st.markdown(
-                    f'<iframe src="data:application/pdf;base64,{b64_preview}" '
-                    f'width="100%" height="480px" style="border:1px solid #ddd;border-radius:6px;"></iframe>',
-                    unsafe_allow_html=True
-                )
+                _render_pdf_preview(nrf_bytes)
         else:
             st.caption(f"📄 {new_resume_file.name} — Word file attached (preview not available)")
 
