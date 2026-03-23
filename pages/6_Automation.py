@@ -317,7 +317,7 @@ with tab4:
 
         col_a, col_b = st.columns(2)
         with col_a:
-            send_emails_toggle = st.checkbox("📧 Auto-send screening email to each", value=True,
+            send_emails_toggle = st.checkbox("📧 Auto-send screening email to each", value=False,
                                               help="Sends screening form link via Gmail to each new candidate")
         with col_b:
             st.write("")

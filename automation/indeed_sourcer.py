@@ -206,7 +206,7 @@ def _send_email_async(candidate_id: int, name: str, email: str, questions: list)
 
 def run_import(
     candidates: list = None,
-    send_emails: bool = True,
+    send_emails: bool = False,
     local_only: bool = False
 ) -> dict:
     """
