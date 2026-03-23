@@ -1,10 +1,11 @@
 import streamlit as st
 import sys
 import os
-from datetime import date, time
+from datetime import date, time, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.db import add_interview, get_all_interviews, update_interview_status, get_all_candidates
+from utils.db import (add_interview, get_all_interviews, update_interview_status,
+                      get_all_candidates, get_candidate, log_activity)
 
 st.set_page_config(page_title="Interviews — Anilee Hiring", page_icon="📅", layout="wide")
 st.title("📅 Interview Management")
@@ -18,6 +19,30 @@ STATUS_COLORS = {
     "Cancelled": "#6C757D",
 }
 
+
+def _send_invite(candidate_name, candidate_email, iv_date_str, iv_time_str, mode, interviewer, candidate_id):
+    """Send interview invite email and return (ok, message)."""
+    try:
+        from utils.email_service import send_interview_invite
+        meet_link = "In Person — Anilee Academy, Satara" if mode == "In Person" else \
+                    "Phone call — HR will call you" if mode == "Phone Call" else \
+                    "Google Meet link will be shared shortly"
+        ok, msg = send_interview_invite(
+            candidate_name=candidate_name,
+            candidate_email=candidate_email,
+            interview_date=datetime.strptime(iv_date_str, "%Y-%m-%d").strftime("%d %B %Y"),
+            interview_time=iv_time_str + " IST",
+            meet_link=meet_link,
+            interviewer=interviewer
+        )
+        if ok:
+            log_activity(candidate_id, candidate_name, "Interview Email Sent",
+                         f"Invite sent to {candidate_email}", "System")
+        return ok, msg
+    except Exception as e:
+        return False, str(e)
+
+
 tab1, tab2 = st.tabs(["All Interviews", "📅 Schedule New Interview"])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -30,7 +55,6 @@ with tab1:
     if status_filter != "All":
         interviews = [iv for iv in interviews if iv["status"] == status_filter]
 
-    # Summary counts
     total_iv = len(interviews)
     scheduled = sum(1 for iv in interviews if iv["status"] == "Scheduled")
     hired = sum(1 for iv in interviews if iv["status"] == "Completed - Hired")
@@ -84,8 +108,22 @@ with tab1:
                         st.success("Updated!")
                         st.rerun()
 
-                if iv.get("notes") and not st.session_state.get(f"ivn_{iv['id']}"):
-                    st.caption(f"Notes: {iv['notes']}")
+                # ── Resend Interview Email ────────────────────────────────────
+                cand = get_candidate(iv["candidate_id"])
+                cand_email = cand.get("email", "") if cand else ""
+                if cand_email:
+                    if st.button(f"📧 Resend Interview Email", key=f"resend_{iv['id']}"):
+                        ok, msg = _send_invite(
+                            iv["candidate_name"], cand_email,
+                            iv["scheduled_date"], iv["scheduled_time"],
+                            iv["mode"], iv["interviewer"], iv["candidate_id"]
+                        )
+                        if ok:
+                            st.success(f"✅ Interview email resent to {cand_email}")
+                        else:
+                            st.error(f"❌ Failed: {msg}")
+                else:
+                    st.warning("⚠️ No email on file — cannot send invite")
 
                 # WhatsApp reminder helper
                 with st.expander("📱 Generate WhatsApp Reminder"):
@@ -109,7 +147,6 @@ with tab2:
     st.subheader("Schedule a New Interview")
 
     all_cands = get_all_candidates()
-    # All active candidates can be scheduled — exclude only Hired & Rejected
     eligible = [c for c in all_cands if c["stage"] not in ["Hired", "Rejected"]]
 
     if not eligible:
@@ -140,6 +177,7 @@ with tab2:
                 notes = st.text_area("Notes for Interviewer",
                                     placeholder="Key points to cover, candidate background…",
                                     height=100)
+                send_email_flag = st.checkbox("📧 Send interview invite email to candidate", value=True)
 
             if st.form_submit_button("📅 Schedule Interview", type="primary", use_container_width=True):
                 if not interviewer.strip():
@@ -161,8 +199,23 @@ with tab2:
                             f"✅ Interview scheduled for **{selected_cand['name']}** "
                             f"on {iv_date.strftime('%d %b %Y')} at {iv_time.strftime('%I:%M %p')}!"
                         )
-                        st.info(f"📱 Candidate Phone: **{selected_cand.get('phone', 'N/A')}**  \n"
-                                f"Remember to send a WhatsApp confirmation message.")
+
+                        # Auto-send interview invite email
+                        cand_email = selected_cand.get("email", "")
+                        if send_email_flag and cand_email:
+                            ok, msg = _send_invite(
+                                selected_cand["name"], cand_email,
+                                iv_date.strftime("%Y-%m-%d"), iv_time.strftime("%H:%M"),
+                                mode, interviewer, selected_cand["id"]
+                            )
+                            if ok:
+                                st.success(f"📧 Interview invite email sent to **{cand_email}**")
+                            else:
+                                st.warning(f"⚠️ Interview saved but email failed: {msg}")
+                        elif send_email_flag and not cand_email:
+                            st.warning("⚠️ No email on file for this candidate — invite not sent. "
+                                       "Add their email from the Candidates page.")
+
                         st.balloons()
                         st.rerun()
                     except Exception as e:
