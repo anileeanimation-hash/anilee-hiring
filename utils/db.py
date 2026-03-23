@@ -150,12 +150,16 @@ def init_db():
             questions
         )
 
-    # Migration: add resume_path column if not present
-    try:
-        c.execute("ALTER TABLE candidates ADD COLUMN resume_path TEXT DEFAULT ''")
-        conn.commit()
-    except Exception:
-        pass  # Column already exists
+    # Migrations: add resume columns if not present
+    for col_sql in [
+        "ALTER TABLE candidates ADD COLUMN resume_path     TEXT    DEFAULT ''",
+        "ALTER TABLE candidates ADD COLUMN resume_filename TEXT    DEFAULT ''",
+        "ALTER TABLE candidates ADD COLUMN resume_data     BLOB    DEFAULT NULL",
+    ]:
+        try:
+            c.execute(col_sql)
+        except Exception:
+            pass  # column already exists — safe to ignore
 
     conn.commit()
     conn.close()
@@ -164,16 +168,28 @@ def init_db():
 # ── RESUME HELPERS ───────────────────────────────────────────────────────────
 
 def save_resume(candidate_id: int, filename: str, file_bytes: bytes) -> str:
-    """Save resume file to disk and store path in DB. Returns saved path."""
+    """
+    Save resume bytes into the DB (BLOB) AND to disk.
+    Storing in DB means it survives cloud restarts via the GitHub backup.
+    Returns the disk path.
+    """
     ext = os.path.splitext(filename)[1].lower()
     safe_name = f"candidate_{candidate_id}_resume{ext}"
     save_path = os.path.join(RESUME_DIR, safe_name)
+
+    # Write to disk (for fast serving)
+    os.makedirs(RESUME_DIR, exist_ok=True)
     with open(save_path, "wb") as f:
         f.write(file_bytes)
+
+    # Store in DB as BLOB so it is included in every backup/restore
     conn = get_connection()
     c = conn.cursor()
-    c.execute("UPDATE candidates SET resume_path = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-              (save_path, candidate_id))
+    c.execute("""UPDATE candidates
+                 SET resume_path = ?, resume_filename = ?, resume_data = ?,
+                     updated_at = datetime('now','localtime')
+                 WHERE id = ?""",
+              (save_path, filename, file_bytes, candidate_id))
     c.execute("SELECT name FROM candidates WHERE id = ?", (candidate_id,))
     row = c.fetchone()
     if row:
@@ -185,31 +201,63 @@ def save_resume(candidate_id: int, filename: str, file_bytes: bytes) -> str:
 
 
 def get_resume(candidate_id: int):
-    """Returns (path, bytes) if resume exists, else (None, None)."""
+    """
+    Returns (filename, bytes) if a resume exists, else (None, None).
+    - First tries the disk file (fast path).
+    - If the disk file is missing (cloud restart wiped /tmp), restores it from
+      the DB BLOB and writes it back to disk automatically.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT resume_path, resume_filename, resume_data FROM candidates WHERE id = ?",
+              (candidate_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return None, None
+
+    path     = row["resume_path"]     or ""
+    filename = row["resume_filename"] or ""
+    blob     = row["resume_data"]
+
+    if not blob:
+        return None, None  # no resume stored at all
+
+    # Try disk first
+    if path and os.path.exists(path):
+        with open(path, "rb") as f:
+            return filename or os.path.basename(path), f.read()
+
+    # Disk file missing (cloud restart) — reconstruct from BLOB
+    if path:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(blob)
+        except Exception:
+            pass  # best-effort; we still return the bytes from DB
+
+    return filename or os.path.basename(path) or "resume", bytes(blob)
+
+
+def delete_resume(candidate_id: int):
+    """Remove resume from disk and clear all resume columns in DB."""
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT resume_path FROM candidates WHERE id = ?", (candidate_id,))
     row = c.fetchone()
-    conn.close()
-    if not row or not row["resume_path"]:
-        return None, None
-    path = row["resume_path"]
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            return path, f.read()
-    return path, None  # path recorded but file missing (ephemeral cloud restart)
-
-
-def delete_resume(candidate_id: int):
-    """Remove resume file and clear path from DB."""
-    path, _ = get_resume(candidate_id)
-    if path and os.path.exists(path):
-        os.remove(path)
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE candidates SET resume_path = '' WHERE id = ?", (candidate_id,))
+    if row and row["resume_path"] and os.path.exists(row["resume_path"]):
+        try:
+            os.remove(row["resume_path"])
+        except Exception:
+            pass
+    c.execute("""UPDATE candidates
+                 SET resume_path = '', resume_filename = '', resume_data = NULL
+                 WHERE id = ?""", (candidate_id,))
     conn.commit()
     conn.close()
+    _backup("resume deleted")
 
 
 # ── PIPELINE STATS ──────────────────────────────────────────────────────────

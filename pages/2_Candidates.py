@@ -136,7 +136,7 @@ with tab1:
 
                 # ── RESUME SECTION ────────────────────────────────────────────
                 st.markdown("---")
-                res_path, res_bytes = get_resume(cand["id"])
+                res_filename, res_bytes = get_resume(cand["id"])
                 show_resume_key  = f"show_resume_{cand['id']}"
                 show_preview_key = f"show_preview_{cand['id']}"
 
@@ -146,11 +146,10 @@ with tab1:
                 with r_up:
                     if st.button("⬆️ Upload / Change", key=f"res_toggle_{cand['id']}", use_container_width=True):
                         st.session_state[show_resume_key] = not st.session_state.get(show_resume_key, False)
-                        st.session_state[show_preview_key] = False  # close preview when opening uploader
+                        st.session_state[show_preview_key] = False
 
                 if res_bytes:
-                    res_filename = os.path.basename(res_path) if res_path else "resume"
-                    ext = os.path.splitext(res_filename)[1].lower()
+                    ext = os.path.splitext(res_filename or "resume.pdf")[1].lower()
                     dl_name = f"{cand['name'].replace(' ','_')}_resume{ext}"
 
                     ra, rb, rc = st.columns(3)
@@ -167,7 +166,7 @@ with tab1:
                         preview_label = "🔽 Hide Preview" if st.session_state.get(show_preview_key) else "👁️ Preview"
                         if st.button(preview_label, key=f"prev_toggle_{cand['id']}", use_container_width=True):
                             st.session_state[show_preview_key] = not st.session_state.get(show_preview_key, False)
-                            st.session_state[show_resume_key] = False  # close uploader when opening preview
+                            st.session_state[show_resume_key] = False
                     with rc:
                         if st.button("🗑️ Remove", key=f"del_res_{cand['id']}", use_container_width=True):
                             delete_resume(cand["id"])
@@ -181,9 +180,6 @@ with tab1:
                             _render_pdf_preview(res_bytes)
                         else:
                             st.info("📄 Preview not available for Word files. Click ⬇️ Download to open.")
-
-                elif res_path and not res_bytes:
-                    st.caption("⚠️ Resume was lost on server restart — please re-upload.")
                 else:
                     st.caption("No resume uploaded yet.")
 
