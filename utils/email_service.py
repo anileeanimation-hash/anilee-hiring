@@ -56,16 +56,30 @@ def _load_google_creds():
                 pickle.dump(creds, f)
         return creds
 
-    # ── Cloud: build from secrets.toml ────────────────────────────────────────
+    # ── Cloud: try st.secrets first, then env vars ────────────────────────────
+    def _get_secret(key, default=""):
+        # Try st.secrets
+        try:
+            import streamlit as st
+            val = st.secrets.get(key, "")
+            if val:
+                return val
+        except Exception:
+            pass
+        # Fallback to environment variable
+        return os.environ.get(key, default)
+
+    refresh_token = _get_secret("GOOGLE_REFRESH_TOKEN")
+    if not refresh_token:
+        return None
+
     try:
-        import streamlit as st
-        s = st.secrets
         creds = Credentials(
-            token=s.get("GOOGLE_TOKEN", ""),
-            refresh_token=s.get("GOOGLE_REFRESH_TOKEN", ""),
-            token_uri=s.get("GOOGLE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
-            client_id=s.get("GOOGLE_CLIENT_ID", ""),
-            client_secret=s.get("GOOGLE_CLIENT_SECRET", ""),
+            token=_get_secret("GOOGLE_TOKEN"),
+            refresh_token=refresh_token,
+            token_uri=_get_secret("GOOGLE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+            client_id=_get_secret("GOOGLE_CLIENT_ID"),
+            client_secret=_get_secret("GOOGLE_CLIENT_SECRET"),
             scopes=[
                 "https://www.googleapis.com/auth/calendar",
                 "https://www.googleapis.com/auth/gmail.send",

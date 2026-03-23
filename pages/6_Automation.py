@@ -86,24 +86,17 @@ with tab1:
         if st.button("▶️ Run Full Automation Now", type="primary", use_container_width=True):
             with st.spinner("Running automation cycle..."):
                 try:
-                    result = subprocess.run(
-                        ["python3", "automation/worker.py"],
-                        capture_output=True, text=True, timeout=300,
-                        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    )
-                    if result.returncode == 0:
-                        st.success("✅ Automation cycle completed!")
-                        try:
-                            data = json.loads(result.stdout.split("\n")[-2] if "\n" in result.stdout else result.stdout)
-                            st.metric("Emails Sent", data.get("emails_sent", 0))
-                            st.metric("Replies Processed", data.get("replies_processed", 0))
-                        except Exception:
-                            st.code(result.stdout[-500:] if result.stdout else "Done")
-                    else:
-                        st.error("Automation had errors")
-                        st.code(result.stderr[-500:] if result.stderr else "Unknown error")
+                    # Run directly in-process so st.secrets and venv packages are available
+                    from automation.worker import run_full_cycle
+                    data = run_full_cycle()
+                    st.success("✅ Automation cycle completed!")
+                    st.metric("Emails Sent", data.get("emails_sent", 0))
+                    st.metric("Replies Processed", data.get("replies_processed", 0))
+                    st.json(data)
                 except Exception as e:
-                    st.error(f"Failed to run: {e}")
+                    st.error(f"Automation error: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
     with col2:
         st.subheader("Set Auto Schedule")
