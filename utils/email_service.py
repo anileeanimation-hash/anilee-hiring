@@ -217,9 +217,28 @@ HR Team — Anilee Academy"""
 
 def send_interview_invite(candidate_name: str, candidate_email: str,
                            interview_date: str, interview_time: str,
-                           meet_link: str, interviewer: str = "HR") -> tuple[bool, str]:
-    """Send Google Meet interview invite to candidate."""
+                           meet_link: str = "", interviewer: str = "HR",
+                           mode: str = "In Person") -> tuple[bool, str]:
+    """Send interview invite email to candidate. Adapts content based on mode."""
     subject = f"Interview Scheduled — Anilee Academy Educational Counsellor | {interview_date}"
+
+    # Build mode-specific location/link block
+    if mode in ("Video Call (Google Meet)", "Google Meet") and meet_link and meet_link.startswith("http"):
+        location_html = f"""
+          <p style="margin:8px 0 0;">
+            🔗 <b>Google Meet Link:</b>
+            <a href="{meet_link}" style="color:#1976D2;">{meet_link}</a>
+          </p>"""
+        location_text = f"Google Meet Link: {meet_link}"
+        tips = "<li>Join from a quiet place with good internet</li><li>Keep camera on if possible</li>"
+    elif mode == "Phone Call":
+        location_html = "<p style='margin:8px 0 0;'>📞 <b>Mode:</b> Phone Call — Our HR team will call you at your registered number.</p>"
+        location_text = "Mode: Phone Call — HR will call you at your registered number."
+        tips = "<li>Keep your phone charged and reachable</li><li>Find a quiet place to talk</li>"
+    else:  # In Person
+        location_html = "<p style='margin:8px 0 0;'>📍 <b>Location:</b> Anilee Academy, Satara, Maharashtra</p>"
+        location_text = "Location: Anilee Academy, Satara, Maharashtra (In Person)"
+        tips = "<li>Reach 10 minutes early</li><li>Bring your resume and any certificates</li>"
 
     body_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -236,16 +255,12 @@ def send_interview_invite(candidate_name: str, candidate_email: str,
           <p style="margin:4px 0;">📅 <b>Date:</b> {interview_date}</p>
           <p style="margin:4px 0;">⏰ <b>Time:</b> {interview_time}</p>
           <p style="margin:4px 0;">👤 <b>Interviewer:</b> {interviewer}</p>
-          <p style="margin:8px 0 0;">
-            🔗 <b>Google Meet Link:</b>
-            <a href="{meet_link}" style="color:#1976D2;">{meet_link}</a>
-          </p>
+          {location_html}
         </div>
 
         <p><b>Please keep ready:</b></p>
         <ul>
-          <li>A quiet place with good internet connection</li>
-          <li>Your resume / any experience certificates</li>
+          {tips}
           <li>Be on time — interview will start as scheduled</li>
         </ul>
         <p>For any queries, contact: hr.anileeanimation@gmail.com</p>
@@ -263,10 +278,9 @@ Your interview has been scheduled for the Educational Counsellor position.
 Date: {interview_date}
 Time: {interview_time}
 Interviewer: {interviewer}
-Google Meet Link: {meet_link}
+{location_text}
 
-Please join 2 minutes early.
-Contact: hr.anileeanimation@gmail.com
+Please be on time. Contact: hr.anileeanimation@gmail.com
 
 Regards, HR Team — Anilee Academy"""
 

@@ -20,20 +20,18 @@ STATUS_COLORS = {
 }
 
 
-def _send_invite(candidate_name, candidate_email, iv_date_str, iv_time_str, mode, interviewer, candidate_id):
+def _send_invite(candidate_name, candidate_email, iv_date_str, iv_time_str, mode, interviewer, candidate_id, meet_link=""):
     """Send interview invite email and return (ok, message)."""
     try:
         from utils.email_service import send_interview_invite
-        meet_link = "In Person — Anilee Academy, Satara" if mode == "In Person" else \
-                    "Phone call — HR will call you" if mode == "Phone Call" else \
-                    "Google Meet link will be shared shortly"
         ok, msg = send_interview_invite(
             candidate_name=candidate_name,
             candidate_email=candidate_email,
             interview_date=datetime.strptime(iv_date_str, "%Y-%m-%d").strftime("%d %B %Y"),
             interview_time=iv_time_str + " IST",
             meet_link=meet_link,
-            interviewer=interviewer
+            interviewer=interviewer,
+            mode=mode
         )
         if ok:
             log_activity(candidate_id, candidate_name, "Interview Email Sent",
@@ -113,10 +111,14 @@ with tab1:
                 cand_email = cand.get("email", "") if cand else ""
                 if cand_email:
                     if st.button(f"📧 Resend Interview Email", key=f"resend_{iv['id']}"):
+                        # Extract meet link from notes if present
+                        import re as _re
+                        ml_match = _re.search(r'(https://meet\.google\.com/\S+)', iv.get("notes", ""))
+                        ml = ml_match.group(1) if ml_match else ""
                         ok, msg = _send_invite(
                             iv["candidate_name"], cand_email,
                             iv["scheduled_date"], iv["scheduled_time"],
-                            iv["mode"], iv["interviewer"], iv["candidate_id"]
+                            iv["mode"], iv["interviewer"], iv["candidate_id"], ml
                         )
                         if ok:
                             st.success(f"✅ Interview email resent to {cand_email}")
@@ -206,7 +208,7 @@ with tab2:
                             ok, msg = _send_invite(
                                 selected_cand["name"], cand_email,
                                 iv_date.strftime("%Y-%m-%d"), iv_time.strftime("%H:%M"),
-                                mode, interviewer, selected_cand["id"]
+                                mode, interviewer, selected_cand["id"], meet_link=""
                             )
                             if ok:
                                 st.success(f"📧 Interview invite email sent to **{cand_email}**")
