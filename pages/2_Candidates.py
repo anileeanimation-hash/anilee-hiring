@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 import os
 import threading
+import base64
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,44 +114,67 @@ with tab1:
 
                 # ── RESUME SECTION ────────────────────────────────────────────
                 st.markdown("---")
-                resume_col1, resume_col2 = st.columns([3, 1])
-                with resume_col1:
+                res_path, res_bytes = get_resume(cand["id"])
+                show_resume_key  = f"show_resume_{cand['id']}"
+                show_preview_key = f"show_preview_{cand['id']}"
+
+                r_hdr, r_up = st.columns([3, 1])
+                with r_hdr:
                     st.markdown("**📎 Resume**")
-                with resume_col2:
-                    show_resume_key = f"show_resume_{cand['id']}"
+                with r_up:
                     if st.button("⬆️ Upload / Change", key=f"res_toggle_{cand['id']}", use_container_width=True):
                         st.session_state[show_resume_key] = not st.session_state.get(show_resume_key, False)
+                        st.session_state[show_preview_key] = False  # close preview when opening uploader
 
-                # Show existing resume
-                res_path, res_bytes = get_resume(cand["id"])
                 if res_bytes:
                     res_filename = os.path.basename(res_path) if res_path else "resume"
                     ext = os.path.splitext(res_filename)[1].lower()
                     dl_name = f"{cand['name'].replace(' ','_')}_resume{ext}"
-                    r1, r2 = st.columns(2)
-                    with r1:
+
+                    ra, rb, rc = st.columns(3)
+                    with ra:
                         st.download_button(
-                            label=f"⬇️ Download Resume",
+                            label="⬇️ Download",
                             data=res_bytes,
                             file_name=dl_name,
                             mime="application/pdf" if ext == ".pdf" else "application/octet-stream",
                             key=f"dl_res_{cand['id']}",
                             use_container_width=True
                         )
-                    with r2:
-                        if st.button("🗑️ Remove Resume", key=f"del_res_{cand['id']}", use_container_width=True):
+                    with rb:
+                        preview_label = "🔽 Hide Preview" if st.session_state.get(show_preview_key) else "👁️ Preview"
+                        if st.button(preview_label, key=f"prev_toggle_{cand['id']}", use_container_width=True):
+                            st.session_state[show_preview_key] = not st.session_state.get(show_preview_key, False)
+                            st.session_state[show_resume_key] = False  # close uploader when opening preview
+                    with rc:
+                        if st.button("🗑️ Remove", key=f"del_res_{cand['id']}", use_container_width=True):
                             delete_resume(cand["id"])
+                            st.session_state[show_preview_key] = False
                             st.success("Resume removed.")
                             st.rerun()
+
+                    # ── Inline preview ────────────────────────────────────────
+                    if st.session_state.get(show_preview_key):
+                        if ext == ".pdf":
+                            b64 = base64.b64encode(res_bytes).decode()
+                            st.markdown(
+                                f'<iframe src="data:application/pdf;base64,{b64}" '
+                                f'width="100%" height="520px" style="border:1px solid #ddd;'
+                                f'border-radius:6px;margin-top:6px;"></iframe>',
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.info("📄 Preview not available for Word files. Click ⬇️ Download to open.")
+
                 elif res_path and not res_bytes:
-                    st.caption("⚠️ Resume file was lost on server restart. Please re-upload.")
+                    st.caption("⚠️ Resume was lost on server restart — please re-upload.")
                 else:
                     st.caption("No resume uploaded yet.")
 
-                # Upload form
+                # ── Upload panel ──────────────────────────────────────────────
                 if st.session_state.get(show_resume_key):
                     uploaded_resume = st.file_uploader(
-                        "Upload Resume (PDF or Word)",
+                        "Choose Resume (PDF or Word)",
                         type=["pdf", "docx", "doc"],
                         key=f"res_upload_{cand['id']}"
                     )
@@ -290,6 +314,29 @@ with tab1:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.subheader("Add New Candidate Manually")
+
+    # Resume uploader lives OUTSIDE the form so bytes are available on submit
+    new_resume_file = st.file_uploader(
+        "📎 Attach Resume (optional — PDF or Word)",
+        type=["pdf", "docx", "doc"],
+        key="new_cand_resume"
+    )
+    # Show quick preview for the file being attached
+    if new_resume_file:
+        nrf_ext = os.path.splitext(new_resume_file.name)[1].lower()
+        if nrf_ext == ".pdf":
+            nrf_bytes = new_resume_file.read()
+            new_resume_file.seek(0)   # reset so it can be read again on save
+            b64_preview = base64.b64encode(nrf_bytes).decode()
+            with st.expander("👁️ Preview attached resume", expanded=False):
+                st.markdown(
+                    f'<iframe src="data:application/pdf;base64,{b64_preview}" '
+                    f'width="100%" height="480px" style="border:1px solid #ddd;border-radius:6px;"></iframe>',
+                    unsafe_allow_html=True
+                )
+        else:
+            st.caption(f"📄 {new_resume_file.name} — Word file attached (preview not available)")
+
     with st.form("add_form", clear_on_submit=True):
         ac1, ac2 = st.columns(2)
         with ac1:
@@ -314,6 +361,15 @@ with tab2:
                     expected_salary=int(expected_salary), notes=notes.strip()
                 )
                 st.success(f"✅ {name.strip()} added to pipeline!")
+
+                # Save resume if one was attached
+                if new_resume_file is not None:
+                    try:
+                        new_resume_file.seek(0)
+                        save_resume(cid, new_resume_file.name, new_resume_file.read())
+                        st.success(f"📎 Resume saved for **{name.strip()}**!")
+                    except Exception as e:
+                        st.warning(f"Candidate added but resume save failed: {e}")
 
                 # Auto-send screening email immediately if email is provided
                 if email.strip():
