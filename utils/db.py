@@ -2,7 +2,12 @@ import sqlite3
 import os
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hiring.db")
+_DEFAULT_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hiring.db")
+# On Streamlit Cloud /mount/src is read-only — fall back to /tmp
+if not os.access(os.path.dirname(_DEFAULT_DB), os.W_OK):
+    DB_PATH = "/tmp/hiring.db"
+else:
+    DB_PATH = _DEFAULT_DB
 
 STAGES = ["New", "Outreached", "Screening", "Screened", "Interview Scheduled", "Hired", "Rejected"]
 SOURCES = ["Work India", "Apna", "Indeed", "Manual", "Referral", "Walk-In", "WhatsApp"]
