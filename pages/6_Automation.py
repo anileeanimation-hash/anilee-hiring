@@ -64,8 +64,8 @@ with s4:
 st.divider()
 
 # ── AUTOMATION PIPELINE ────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Run Automation", "📧 Email Actions", "📅 Schedule Interview", "⚙️ Setup Guide"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🚀 Run Automation", "📧 Email Actions", "📅 Schedule Interview", "🔍 Indeed Sourcer", "⚙️ Setup Guide"
 ])
 
 # TAB 1: RUN AUTOMATION
@@ -270,8 +270,106 @@ with tab3:
                     st.balloons()
 
 
-# TAB 4: SETUP GUIDE
+# TAB 4: INDEED SOURCER
 with tab4:
+    st.subheader("🔍 Indeed Candidate Sourcer")
+    st.caption("Auto-imports candidates from your Indeed job postings (FREE — no paid plan needed)")
+
+    st.info("""
+    **How it works:**
+    - Candidates who apply to your Indeed job posting have their **full CV visible for free**
+    - This sourcer reads those applicants, adds them to the portal, and sends screening emails
+    - Runs de-duplication — existing candidates are never added twice
+    - **15 candidates** scraped from Indeed (2026-03-24) are ready to import
+    """)
+
+    from utils.db import get_all_candidates as _get_all
+    from automation.indeed_sourcer import INDEED_CANDIDATES, run_import, is_duplicate, _existing_phones_emails
+
+    # Show pending vs already imported
+    existing_phones, existing_emails = _existing_phones_emails()
+    pending = [c for c in INDEED_CANDIDATES if not is_duplicate(c, existing_phones, existing_emails)]
+    already_imported = [c for c in INDEED_CANDIDATES if is_duplicate(c, existing_phones, existing_emails)]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total scraped from Indeed", len(INDEED_CANDIDATES))
+    m2.metric("Already in portal", len(already_imported))
+    m3.metric("Ready to import", len(pending), delta=f"+{len(pending)} new" if pending else None)
+
+    st.divider()
+
+    if pending:
+        st.subheader(f"📥 {len(pending)} New Candidates to Import")
+
+        # Preview table
+        import pandas as pd
+        preview_data = []
+        for c in pending:
+            preview_data.append({
+                "Name": c["name"],
+                "Phone": c["phone"],
+                "Email": c["email"],
+                "Location": c["location"],
+                "Role Applied": c.get("job_role", ""),
+                "Experience": f"{c.get('experience_months', 0) // 12}yr {c.get('experience_months', 0) % 12}mo" if c.get("experience_months") else "Fresh",
+            })
+        st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            send_emails_toggle = st.checkbox("📧 Auto-send screening email to each", value=True,
+                                              help="Sends screening form link via Gmail to each new candidate")
+        with col_b:
+            st.write("")
+
+        if st.button("▶️ Import Now", type="primary", use_container_width=True):
+            with st.spinner(f"Importing {len(pending)} candidates…"):
+                result = run_import(send_emails=send_emails_toggle)
+
+            if result["added"] > 0:
+                st.success(f"✅ Imported {result['added']} candidates! "
+                           f"{'📧 Screening emails queued.' if result['email_queued'] else ''}")
+            else:
+                st.info("No new candidates added (all already in portal).")
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Added", result["added"])
+            c2.metric("Duplicates skipped", result["skipped_duplicates"])
+            c3.metric("Emails sent", result["email_queued"])
+
+            if result["errors"]:
+                st.error("Errors:\n" + "\n".join(result["errors"]))
+
+            # Detail table
+            detail_df = pd.DataFrame(result["details"])
+            if not detail_df.empty:
+                st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+            st.rerun()
+
+    else:
+        st.success("✅ All 15 Indeed candidates are already in the portal!")
+
+    if already_imported:
+        with st.expander(f"Already imported ({len(already_imported)})"):
+            for c in already_imported:
+                st.write(f"• **{c['name']}** — {c['phone']} — {c['location']}")
+
+    st.divider()
+    st.subheader("🔄 How to Get Fresh Candidates from Indeed")
+    st.markdown("""
+    **Step 1:** Open [employers.indeed.com/candidates](https://employers.indeed.com/candidates) → your candidates appear here when someone applies.
+
+    **Step 2:** When new applicants arrive, ask Claude to "scrape today's Indeed candidates" — it will visit each profile, extract contact info, and update `INDEED_CANDIDATES` in `automation/indeed_sourcer.py`.
+
+    **Step 3:** Come back here and click **Import Now** — new ones added, duplicates skipped automatically.
+
+    > 💡 **Tip:** Post more jobs on Indeed for free → more applicants → more free candidates daily.
+    """)
+
+
+# TAB 5: SETUP GUIDE
+with tab5:
     st.subheader("⚙️ Setup Guide — Complete These Steps")
 
     with st.expander("1. 🤖 Claude AI (for screening) — REQUIRED", expanded=not (claude_ok or api_key)):
