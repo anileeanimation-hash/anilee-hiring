@@ -9,6 +9,15 @@ if not os.access(os.path.dirname(_DEFAULT_DB), os.W_OK):
 else:
     DB_PATH = _DEFAULT_DB
 
+# ── Auto-backup helper ────────────────────────────────────────────────────────
+def _backup(reason: str = "write"):
+    """Push DB to GitHub in a background thread — never blocks the UI."""
+    try:
+        from utils.db_sync import trigger_backup_async
+        trigger_backup_async(DB_PATH, reason)
+    except Exception:
+        pass  # backup is best-effort; never crash the app
+
 STAGES = ["New", "Outreached", "Screening", "Screened", "Interview Scheduled", "Hired", "Rejected"]
 SOURCES = ["Work India", "Apna", "Indeed", "Manual", "Referral", "Walk-In", "WhatsApp"]
 
@@ -28,6 +37,16 @@ def rows_to_dicts(rows):
 
 
 def init_db():
+    # ── Auto-restore from GitHub if DB is missing or empty ───────────────────
+    db_is_fresh = not os.path.exists(DB_PATH) or os.path.getsize(DB_PATH) == 0
+    if db_is_fresh:
+        try:
+            from utils.db_sync import pull_db
+            ok, msg = pull_db(DB_PATH)
+            # ok=True means we restored successfully; either way, continue to init
+        except Exception:
+            pass  # No backup yet or no token — fresh start
+
     conn = get_connection()
     c = conn.cursor()
     c.executescript("""
@@ -177,6 +196,7 @@ def add_candidate(name, phone, email='', source='Manual', location='Satara',
     _log(c, cid, name, "Added to Pipeline", f"Source: {source}", "HR")
     conn.commit()
     conn.close()
+    _backup(f"new candidate: {name}")
     return cid
 
 
@@ -251,6 +271,7 @@ def update_candidate_stage(candidate_id, new_stage, performed_by="HR"):
         _log(c, candidate_id, name, "Stage Changed", f"{old_stage} → {new_stage}", performed_by)
     conn.commit()
     conn.close()
+    _backup(f"stage change: {new_stage}")
 
 
 def update_candidate_score(candidate_id, score, score_band, ai_summary=''):
@@ -266,6 +287,7 @@ def update_candidate_score(candidate_id, score, score_band, ai_summary=''):
              f"Score: {score}% — {score_band}", "AI System")
     conn.commit()
     conn.close()
+    _backup(f"score updated: {score_band}")
 
 
 def delete_candidate(candidate_id):
@@ -378,6 +400,7 @@ def save_response(candidate_id, question_id, question_text, response_text, ai_sc
                   (candidate_id, question_id, question_text, response_text, ai_score, ai_feedback))
     conn.commit()
     conn.close()
+    _backup("screening response saved")
 
 
 def get_candidate_responses(candidate_id):
@@ -410,6 +433,7 @@ def add_interview(candidate_id, candidate_name, candidate_phone, scheduled_date,
          f"{scheduled_date} at {scheduled_time}", "HR")
     conn.commit()
     conn.close()
+    _backup(f"interview scheduled: {candidate_name}")
 
 
 def get_all_interviews():
@@ -440,6 +464,7 @@ def update_interview_status(interview_id, status, notes=""):
         _log(c, row['candidate_id'], row['candidate_name'], "Interview Updated", status, "HR")
     conn.commit()
     conn.close()
+    _backup(f"interview updated: {status}")
 
 
 # ── ACTIVITY LOG ─────────────────────────────────────────────────────────────
