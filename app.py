@@ -1,9 +1,10 @@
 import streamlit as st
 import sys
 import os
+import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils.db import init_db, get_pipeline_stats, get_recent_activity
+from utils.db import init_db, get_pipeline_stats, get_recent_activity, DB_PATH
 
 st.set_page_config(
     page_title="Anilee Academy — Hiring Portal",
@@ -122,3 +123,42 @@ with col_right:
             export ANTHROPIC_API_KEY="sk-ant-..."
             ```
             """)
+
+# ── SIDEBAR: DATABASE BACKUP / RESTORE ───────────────────────────────────────
+with st.sidebar:
+    st.divider()
+    with st.expander("🔒 DB Backup / Restore", expanded=False):
+        st.caption("Download a copy of all data, or restore from a backup file.")
+
+        # Download (Export)
+        if os.path.exists(DB_PATH):
+            with open(DB_PATH, "rb") as f:
+                db_bytes = f.read()
+            from datetime import datetime
+            fname = f"hiring_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db"
+            st.download_button(
+                label="⬇️ Download Database Backup",
+                data=db_bytes,
+                file_name=fname,
+                mime="application/octet-stream",
+                use_container_width=True,
+                help="Save this file on your laptop. Use it to restore data if needed."
+            )
+        else:
+            st.warning("No DB found yet.")
+
+        st.markdown("---")
+
+        # Upload (Restore)
+        uploaded = st.file_uploader(
+            "⬆️ Restore from backup (.db file)",
+            type=["db"],
+            help="Upload a previously downloaded .db backup file to restore all data."
+        )
+        if uploaded is not None:
+            if st.button("✅ Confirm Restore", type="primary", use_container_width=True):
+                # Write uploaded file to DB_PATH
+                with open(DB_PATH, "wb") as f:
+                    f.write(uploaded.read())
+                st.success("✅ Database restored! Reloading...")
+                st.rerun()
