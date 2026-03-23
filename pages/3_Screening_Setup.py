@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.db import get_screening_questions, toggle_question, update_question_weight
+from utils.db import get_screening_questions, toggle_question, update_question_weight, add_question, delete_question
 from utils.ai_screener import get_whatsapp_template
 
 st.set_page_config(page_title="Screening Setup — Anilee Hiring", page_icon="⚙️", layout="wide")
@@ -84,6 +84,70 @@ for cat in categories:
             st.rerun()
         if weight != int(q["weight"]):
             update_question_weight(q["id"], weight)
+
+st.divider()
+
+# ── ADD CUSTOM QUESTION ───────────────────────────────────────────────────────
+st.markdown("""
+<div style="background:#e8f5e9; border:1px solid #4CAF50; padding:12px 16px;
+            border-radius:8px; margin-bottom:12px;">
+    <b>➕ Add Your Own Question</b><br>
+    <small>HR can add any custom question here. It will appear on the screening form and
+    AI will score it automatically.</small>
+</div>""", unsafe_allow_html=True)
+
+with st.form("add_custom_question_form", clear_on_submit=True):
+    new_q = st.text_area(
+        "Your Question *",
+        placeholder="e.g. Do you have a two-wheeler for field visits?",
+        height=90
+    )
+    cq1, cq2, cq3 = st.columns(3)
+    with cq1:
+        new_cat = st.text_input("Category", value="Custom",
+                                help="Group label e.g. Logistics, Skills, Custom")
+    with cq2:
+        new_type = st.selectbox("Question Type",
+                                ["Scoring (AI rates 0–10)", "Hard Filter (Pass/Fail)"])
+    with cq3:
+        new_weight = st.selectbox("Importance", [1, 2, 3],
+                                  format_func=lambda x: {1: "1 — Normal", 2: "2 — Important",
+                                                          3: "3 — Critical"}[x])
+
+    submitted = st.form_submit_button("➕ Add Question", type="primary", use_container_width=True)
+    if submitted:
+        if not new_q.strip():
+            st.warning("⚠️ Please type your question first.")
+        else:
+            is_hf = 1 if "Hard Filter" in new_type else 0
+            add_question(new_q, new_cat, is_hf, new_weight)
+            st.success(f"✅ Question added: \"{new_q.strip()[:60]}{'...' if len(new_q) > 60 else ''}\"")
+            st.rerun()
+
+# ── CUSTOM QUESTIONS — DELETE ─────────────────────────────────────────────────
+custom_qs = [q for q in get_screening_questions() if q["category"] == "Custom"
+             or q["id"] > 15]   # questions beyond the default 15 are custom
+if custom_qs:
+    st.markdown("**Your Custom Questions** *(click 🗑️ to remove)*")
+    for q in custom_qs:
+        col_q, col_del = st.columns([8, 1])
+        with col_q:
+            badge = "🚨 Hard Filter" if q["is_hard_filter"] else "📊 Scoring"
+            st.markdown(
+                f"<div style='padding:8px 12px;background:#fff;border:1px solid #ddd;"
+                f"border-radius:6px;margin:3px 0;font-size:14px;'>"
+                f"<span style='background:#6c757d;color:white;padding:1px 7px;"
+                f"border-radius:8px;font-size:11px;margin-right:8px;'>{badge}</span>"
+                f"{q['question']}</div>",
+                unsafe_allow_html=True
+            )
+        with col_del:
+            st.markdown("<div style='margin-top:6px;'>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"del_{q['id']}", help="Delete this question"):
+                delete_question(q["id"])
+                st.success("Question deleted.")
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
 st.divider()
 

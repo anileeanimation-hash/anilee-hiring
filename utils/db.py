@@ -333,6 +333,32 @@ def update_question_weight(question_id, weight):
     conn.close()
 
 
+def add_question(question: str, category: str = "Custom", is_hard_filter: int = 0,
+                 weight: int = 1) -> int:
+    """Add a new custom screening question. Returns new question id."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT MAX(order_index) FROM screening_questions")
+    row = c.fetchone()
+    next_order = (row[0] or 0) + 1
+    c.execute("""INSERT INTO screening_questions (question, category, is_hard_filter, is_enabled, weight, order_index)
+                 VALUES (?, ?, ?, 1, ?, ?)""",
+              (question.strip(), category.strip(), is_hard_filter, weight, next_order))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def delete_question(question_id: int):
+    """Delete a screening question by id."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM screening_questions WHERE id = ?", (question_id,))
+    conn.commit()
+    conn.close()
+
+
 # ── CANDIDATE RESPONSES ──────────────────────────────────────────────────────
 
 def save_response(candidate_id, question_id, question_text, response_text, ai_score=0, ai_feedback=''):
