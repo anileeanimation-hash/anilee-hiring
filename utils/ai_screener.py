@@ -115,6 +115,69 @@ def _parse_json(text: str) -> dict:
     return {}
 
 
+def _rule_based_score_response(question: str, response_text: str,
+                                is_hard_filter: bool) -> tuple[int, str]:
+    """Rule-based fallback scorer when AI is unavailable."""
+    t = response_text.strip().lower()
+    q = question.lower()
+
+    if is_hard_filter:
+        # Yes/No hard filters — check for positive/negative answer
+        positive = ["yes", "ho", "ahe", "hoy", "haa", "haan", "available", "ready",
+                    "can", "will", "sure", "definitely", "absolutely", "agree"]
+        negative = ["no", "nahi", "naahi", "not", "cannot", "can't", "won't",
+                    "unable", "unavailable", "no i"]
+        t_clean = t.replace("'", "").replace(",", "")
+        is_positive = any(t_clean.startswith(p) or f" {p}" in t_clean or t_clean == p
+                          for p in positive)
+        is_negative = any(t_clean.startswith(n) or t_clean == n for n in negative)
+        if is_negative and not is_positive:
+            return 0, "Candidate answered negatively."
+        return 10, "Candidate confirmed requirement."
+
+    # Soft question — score 0-10 based on response quality + keywords
+    score = 0
+
+    # 1. Response length / effort (0-4 pts)
+    words = len(t.split())
+    if words >= 40:
+        score += 4
+    elif words >= 20:
+        score += 3
+    elif words >= 10:
+        score += 2
+    elif words >= 4:
+        score += 1
+
+    # 2. Sales / counselling keywords (0-3 pts)
+    sales_kw = ["sales", "target", "lead", "conversion", "counsell", "admission",
+                "enroll", "achieve", "close", "pitch", "followup", "follow up",
+                "client", "customer", "revenue", "incentive"]
+    hits = sum(1 for k in sales_kw if k in t)
+    score += min(hits, 3)
+
+    # 3. Experience / numbers mentioned (0-2 pts)
+    import re
+    has_numbers = bool(re.search(r'\d+', t))
+    exp_kw = ["year", "month", "experience", "worked", "job", "company", "institute",
+              "academy", "school", "college"]
+    has_exp = any(k in t for k in exp_kw)
+    if has_numbers and has_exp:
+        score += 2
+    elif has_numbers or has_exp:
+        score += 1
+
+    # 4. Salary / availability / location (0-1 pt)
+    bonus_kw = ["satara", "sangli", "kolhapur", "15000", "20000", "25000",
+                "immediately", "join", "₹", "rs ", "lakh", "salary"]
+    if any(k in t for k in bonus_kw):
+        score += 1
+
+    score = min(10, max(1, score))
+    feedback = f"Rule-based score ({words} words). AI scoring unavailable — review manually."
+    return score, feedback
+
+
 def score_response(question: str, response_text: str, category: str,
                    is_hard_filter: bool, weight: int) -> tuple[int, str]:
     """Score a single candidate response. Returns (score 0-10, feedback)."""
@@ -150,7 +213,7 @@ Reply ONLY with JSON: {{"score": <0-10>, "feedback": "<1-2 sentences>"}}"""
     result = _parse_json(text)
 
     if not result:
-        return 5, "Auto-scored (Claude unavailable)"
+        return _rule_based_score_response(question, response_text, is_hard_filter)
 
     if is_hard_filter:
         score = 10 if int(result.get("pass", 0)) == 1 else 0
@@ -158,6 +221,95 @@ Reply ONLY with JSON: {{"score": <0-10>, "feedback": "<1-2 sentences>"}}"""
     else:
         score = min(10, max(0, int(result.get("score", 5))))
         return score, result.get("feedback", "")
+
+
+def _rule_based_score_full(candidate_name: str, email_body: str,
+                           enabled_questions: list) -> tuple[int, str, str, bool]:
+    """Rule-based full-form scorer when AI is unavailable. Returns (score, band, summary, hard_fail)."""
+    import re
+    t = email_body.lower()
+    score = 0
+    hard_fail = False
+    flags = []
+
+    # ── Hard filter checks ────────────────────────────────────────────────────
+    # Location check
+    location_kw = ["satara", "sangli", "kolhapur", "ichalkaranji", "karad",
+                   "miraj", "nearby", "local", "same city"]
+    neg_location = ["not in satara", "nahi rahato", "other city", "pune", "mumbai",
+                    "delhi", "bangalore", "chennai", "hyderabad"]
+    if any(k in t for k in neg_location):
+        hard_fail = True
+        flags.append("Location mismatch")
+    elif any(k in t for k in location_kw):
+        score += 15
+
+    # Marathi check
+    marathi_pos = ["marathi", "ho", "hoy", "ahe", "ahet", "bolto", "boltoy"]
+    if any(k in t for k in marathi_pos):
+        score += 10
+
+    # ── Experience scoring ────────────────────────────────────────────────────
+    exp_numbers = re.findall(r'(\d+)\s*(year|yr|month|mahina)', t)
+    if exp_numbers:
+        num, unit = exp_numbers[0]
+        months = int(num) * 12 if "year" in unit or "yr" in unit else int(num)
+        if months >= 24:
+            score += 20
+        elif months >= 12:
+            score += 15
+        elif months >= 3:
+            score += 10
+        else:
+            score += 3
+    else:
+        exp_kw = ["experience", "worked", "job", "company", "sales", "counselling",
+                  "admission", "bde", "executive", "intern"]
+        if any(k in t for k in exp_kw):
+            score += 8
+
+    # ── Sales aptitude keywords ───────────────────────────────────────────────
+    sales_kw = ["target", "lead", "conversion", "close", "achieve", "pitch",
+                "follow", "enroll", "client", "revenue", "incentive", "cold call"]
+    hits = sum(1 for k in sales_kw if k in t)
+    score += min(hits * 4, 20)
+
+    # ── Response quality / effort ─────────────────────────────────────────────
+    words = len(t.split())
+    if words >= 150:
+        score += 15
+    elif words >= 80:
+        score += 10
+    elif words >= 40:
+        score += 7
+    elif words >= 15:
+        score += 3
+
+    # ── Salary in reasonable range ────────────────────────────────────────────
+    salary_nums = re.findall(r'(\d{4,6})', t)
+    for s in salary_nums:
+        val = int(s)
+        if 12000 <= val <= 30000:
+            score += 5
+            break
+        elif val > 50000:
+            score -= 5  # Unrealistic expectation
+
+    # ── Availability ─────────────────────────────────────────────────────────
+    avail_kw = ["immediately", "join", "available", "notice", "week", "days"]
+    if any(k in t for k in avail_kw):
+        score += 5
+
+    score = min(95, max(0, score))
+
+    if hard_fail:
+        return 0, "Rejected ❌", f"{candidate_name} failed location/hard filter (rule-based check).", True
+
+    band = "Hot 🔥" if score >= 80 else ("Warm ✅" if score >= 60 else ("Cold ❄️" if score >= 40 else "Rejected ❌"))
+    flags_txt = f" Notes: {', '.join(flags)}." if flags else ""
+    summary = (f"{candidate_name} scored {score}% via rule-based analysis ({words} words).{flags_txt} "
+               f"AI scoring unavailable on cloud — manual review recommended.")
+    return score, band, summary, False
 
 
 def score_email_reply(candidate_name: str, email_body: str,
@@ -201,7 +353,7 @@ Score bands: Hot=80+, Warm=60-79, Cold=40-59, Rejected=below 40 or hard filter f
     result = _parse_json(text)
 
     if not result:
-        return 50, "Warm ✅", f"{candidate_name} replied to screening. Manual review needed.", False
+        return _rule_based_score_full(candidate_name, email_body, enabled_questions)
 
     score = min(100, max(0, int(result.get("score", 50))))
     hard_fail = bool(result.get("hard_filter_failed", False))
